@@ -13,3 +13,17 @@ The sample export has the following problems. The import fixes what it safely ca
 | Leading/trailing whitespace (`" EMEA "`) | Trim every field | Otherwise the region filters would show duplicate values. |
 | Invalid launch year (`n/a`, empty) | Store `null`. Warn only for values that are present but not a year | The launch year is optional information. |
 | SKU missing from the export | Mark the product as delisted (`delisted_at`), never delete it | Reviews must survive and links customers have shared must keep working. |
+
+## API
+
+| Decision | Alternatives considered | Why |
+| --- | --- | --- |
+| By default, the list returns only `ACTIVE`, listed products. `?status=` adds phase-out and discontinued ones | Show all products with a badge | Sales' main complaint is customers asking about products we no longer sell. Making them opt in is the safest default. |
+| The detail page also works for delisted products and returns `delisted: true` | 404 / 410 | Links customers have shared keep working, and the page can say clearly that the product is no longer offered. |
+| Values within one filter are OR-ed. Certifications are AND-ed | OR everywhere | A customer who needs Halal **and** Vegan needs both. "Surfactant or Emulsifier" is a normal comparison. |
+| Search uses `ILIKE` on name, SKU, chemistry and description, with LIKE wildcards escaped | Postgres full-text search, Elasticsearch | Simple and good enough for 200 products. At 50k products, the next step is a generated `tsvector` column with a GIN index (or `pg_trgm`). Elasticsearch only if relevance ranking or typo tolerance becomes a requirement. |
+| Offset pagination, max 50 per page, SKU as the final sort key | Cursor pagination | With 50k products and filters, offset is cheap enough and gives "page N" URLs that can be shared. The SKU tie-breaker keeps pages stable. |
+| Filter counts cover the whole listed catalogue, not the current selection | Counts that update as filters change | One cheap query that can be cached. Counts that react to the current selection are a UX improvement for later. |
+| The rating aggregate is stored on the product and **recounted** inside the review transaction, after locking the product row with `FOR UPDATE` | Computing the aggregate on every read; updating a running average | Sorting by rating then needs no aggregation over 50k rows. Recounting cannot drift, and the lock serialises concurrent reviews of the same product (covered by a test). |
+| Reviews: strict validation, trimmed text, max lengths, rate limit of 5 per minute per IP. The text is rendered only as plain text | Captcha, moderation queue | There is no authentication and moderation is out of scope. This is the minimum for a public write endpoint. The remaining risk (spam from many IPs, fake reviews) is listed under risks. |
+| API DTOs are separate from the Prisma model | Returning Prisma entities directly | Internal columns (id, timestamps, `delisted_at`) stay internal, and a schema change does not silently change the API contract. |
