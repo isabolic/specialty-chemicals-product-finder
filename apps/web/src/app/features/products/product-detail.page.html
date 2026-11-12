@@ -1,0 +1,103 @@
+<p-button icon="pi pi-arrow-left" label="Back to results" [text]="true" (onClick)="back()" />
+
+@if (notFound()) {
+  <div class="empty">
+    <h1>Product not found</h1>
+    <p>We could not find a product with SKU {{ sku() }}.</p>
+    <a routerLink="/products">Search the catalogue</a>
+  </div>
+} @else if (product.error()) {
+  <p-message severity="error">Could not load this product. Please try again.</p-message>
+} @else if (product.value(); as p) {
+  <article class="product">
+    <header class="product__head">
+      <div>
+        <h1 class="product__title">{{ p.name }}</h1>
+        <p class="muted">{{ p.chemicalName }} · SKU {{ p.sku }}</p>
+      </div>
+      <div class="product__actions">
+        <app-status-tag [status]="p.status" />
+        <p-button icon="pi pi-share-alt" label="Share" severity="secondary" [outlined]="true" (onClick)="share(p)" />
+      </div>
+    </header>
+    @if (shareFeedback(); as feedback) {
+      <p class="muted" role="status">{{ feedback }}</p>
+    }
+
+    @if (notice(); as n) {
+      <p-message [severity]="n.severity" >{{ n.text }}</p-message>
+    }
+
+    <p class="product__description">{{ p.description }}</p>
+
+    <dl class="facts">
+      <div><dt>Function</dt><dd>{{ p.function }}</dd></div>
+      <div><dt>Application area</dt><dd>{{ p.applicationArea }}</dd></div>
+      <div><dt>Region</dt><dd>{{ p.region }}</dd></div>
+      <div><dt>Launch year</dt><dd>{{ p.launchYear ?? '—' }}</dd></div>
+      <div class="facts__wide">
+        <dt>Certifications</dt>
+        <dd class="certs">
+          @for (c of p.certifications; track c) {
+            <p-tag [value]="c" severity="secondary" />
+          } @empty {
+            <span class="muted">None listed</span>
+          }
+        </dd>
+      </div>
+    </dl>
+  </article>
+
+  <section class="reviews" aria-labelledby="reviews-title">
+    <h2 id="reviews-title">
+      Customer reviews
+      @if (p.reviewCount > 0) {
+        <span class="reviews__score">
+          <i class="pi pi-star-fill" aria-hidden="true"></i> {{ p.ratingAverage }}
+          <span class="muted">({{ p.reviewCount }})</span>
+        </span>
+      }
+    </h2>
+
+    <div class="reviews__layout">
+      <div class="reviews__list">
+        @if (reviews.value(); as page) {
+          @for (r of page.items; track r.id) {
+            <article class="review">
+              <p-rating [ngModel]="r.rating" [readonly]="true" [attr.aria-label]="r.rating + ' out of 5 stars'" />
+              @if (r.title) {
+                <h3 class="review__title">{{ r.title }}</h3>
+              }
+              <!-- Plain-text interpolation only: reviews are untrusted public input. -->
+              <p class="review__body">{{ r.body }}</p>
+              <p class="muted review__meta">{{ r.authorName }} · {{ r.createdAt | date: 'mediumDate' }}</p>
+            </article>
+          } @empty {
+            <p class="muted">No reviews yet. Be the first to share your experience.</p>
+          }
+          @if (page.total > reviewsPageSize) {
+            <p-paginator
+              [first]="(reviewsPage() - 1) * reviewsPageSize"
+              [rows]="reviewsPageSize"
+              [totalRecords]="page.total"
+              [pageLinkSize]="3"
+              (onPageChange)="onReviewsPage($event)"
+            />
+          }
+        } @else if (reviews.isLoading()) {
+          <p-skeleton height="5rem" />
+        }
+      </div>
+
+      @if (!p.delisted) {
+        <div class="reviews__form">
+          <h3>Write a review</h3>
+          <app-review-form [sku]="p.sku" (created)="onReviewCreated()" />
+        </div>
+      }
+    </div>
+  </section>
+} @else {
+  <p-skeleton height="2.5rem" width="60%" />
+  <p-skeleton height="8rem" styleClass="mt" />
+}

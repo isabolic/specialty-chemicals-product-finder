@@ -8,5 +8,11 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/products/product-search.page').then((m) => m.ProductSearchPage),
   },
+  {
+    path: 'products/:sku',
+    title: 'Product · Product Finder',
+    loadComponent: () =>
+      import('./features/products/product-detail.page').then((m) => m.ProductDetailPage),
+  },
   { path: '**', redirectTo: 'products' },
 ];

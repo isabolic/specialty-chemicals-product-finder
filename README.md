@@ -8,7 +8,7 @@ Customer-facing catalogue search for specialty chemicals, fed by the nightly PIM
 
 ```
 apps/api     NestJS + Prisma (PostgreSQL) — REST API and the CSV import CLI
-apps/web     Angular + PrimeNG — the Product Finder UI
+apps/web     Angular 21 + PrimeNG 21 — the Product Finder UI (why not 22: see DECISIONS.md)
 data/        products.csv — sample PIM export (stand-in for the nightly file)
 docker/      Postgres init script (creates the test database)
 ```

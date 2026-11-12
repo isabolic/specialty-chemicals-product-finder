@@ -1,0 +1,99 @@
+<div class="toolbar">
+  <p-iconfield class="toolbar__search">
+    <p-inputicon styleClass="pi pi-search" />
+    <input
+      pInputText
+      type="search"
+      aria-label="Search products"
+      placeholder="Search by name, chemistry, SKU or use…"
+      [ngModel]="searchText()"
+      (ngModelChange)="onType($event)"
+      (keydown.enter)="update({ q: searchText().trim() })"
+    />
+  </p-iconfield>
+
+  <div class="toolbar__actions">
+    <p-button
+      class="toolbar__filters-btn"
+      icon="pi pi-filter"
+      [label]="filterCount() ? 'Filters (' + filterCount() + ')' : 'Filters'"
+      severity="secondary"
+      [outlined]="true"
+      (onClick)="filtersOpen.set(true)"
+    />
+    <p-select
+      [options]="sortOptions"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="state().sort"
+      (ngModelChange)="update({ sort: $event })"
+      ariaLabel="Sort results"
+    />
+    <p-button
+      icon="pi pi-share-alt"
+      severity="secondary"
+      [text]="true"
+      ariaLabel="Share this search"
+      (onClick)="share()"
+    />
+  </div>
+</div>
+@if (shareFeedback(); as feedback) {
+  <p class="share-feedback" role="status">{{ feedback }}</p>
+}
+
+<div class="layout">
+  <aside class="layout__filters" aria-label="Filters">
+    <app-product-filters
+      [state]="state()"
+      [options]="filterOptions.value()"
+      (changed)="update($event)"
+      (cleared)="clearFilters()"
+    />
+  </aside>
+
+  <section class="layout__results" aria-live="polite">
+    @if (results.error()) {
+      <p-message severity="error">Could not load products. Please try again.</p-message>
+    } @else if (results.isLoading() && !results.hasValue()) {
+      @for (s of skeletons; track $index) {
+        <p-skeleton height="7rem" styleClass="result-skeleton" />
+      }
+    } @else if (results.value(); as page) {
+      <p class="summary">
+        {{ page.total }} {{ page.total === 1 ? 'product' : 'products' }}
+        @if (!state().includeInactive) {
+          <span class="muted">· currently available</span>
+        }
+      </p>
+      @for (product of page.items; track product.sku) {
+        <app-product-card [product]="product" />
+      } @empty {
+        <div class="empty">
+          <p>No products match your search.</p>
+          @if (filterCount() || state().q) {
+            <p-button label="Clear search and filters" [text]="true" (onClick)="resetAll()" />
+          }
+        </div>
+      }
+      @if (page.total > pageSize) {
+        <p-paginator
+          [first]="first()"
+          [rows]="pageSize"
+          [totalRecords]="page.total"
+          [pageLinkSize]="3"
+          (onPageChange)="onPage($event)"
+        />
+      }
+    }
+  </section>
+</div>
+
+<p-drawer [visible]="filtersOpen()" (visibleChange)="filtersOpen.set($event)" header="Filters" position="bottom" styleClass="filters-drawer">
+  <app-product-filters
+    [state]="state()"
+    [options]="filterOptions.value()"
+    (changed)="update($event)"
+    (cleared)="clearFilters()"
+  />
+</p-drawer>

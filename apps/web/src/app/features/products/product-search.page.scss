@@ -1,0 +1,51 @@
+:host { display: block; }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+
+  &__search {
+    flex: 1 1 18rem;
+    input { width: 100%; }
+  }
+
+  &__actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+
+  &__filters { display: none; }
+
+  &__results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-width: 0;
+  }
+}
+
+/* Desktop: filters as a sidebar. Mobile: filters in a bottom drawer. */
+@media (min-width: 960px) {
+  .layout {
+    grid-template-columns: 17rem minmax(0, 1fr);
+    &__filters { display: block; }
+  }
+  .toolbar__filters-btn { display: none; }
+}
+
+.summary { margin: 0; font-weight: 600; }
+.muted { color: var(--p-text-muted-color); font-weight: 400; }
+.share-feedback { margin: -0.5rem 0 0.75rem; font-size: 0.875rem; color: var(--p-text-muted-color); }
+.empty { padding: 2rem 0; text-align: center; color: var(--p-text-muted-color); }
+
+:host ::ng-deep .filters-drawer { height: auto; max-height: 85vh; }

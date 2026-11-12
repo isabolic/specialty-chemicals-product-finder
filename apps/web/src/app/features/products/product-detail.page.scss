@@ -1,0 +1,63 @@
+:host { display: flex; flex-direction: column; gap: 1rem; }
+
+.muted { color: var(--p-text-muted-color); margin: 0; }
+.empty { padding: 2rem 0; text-align: center; }
+
+.product {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--p-content-border-color);
+  background: var(--p-content-background);
+
+  &__head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  &__title { margin: 0 0 0.25rem; font-size: 1.5rem; }
+  &__actions { display: flex; align-items: center; gap: 0.5rem; }
+  &__description { margin: 0; line-height: 1.5; }
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.75rem 1.5rem;
+  margin: 0;
+
+  dt { font-size: 0.8125rem; color: var(--p-text-muted-color); }
+  dd { margin: 0.125rem 0 0; font-weight: 500; }
+  &__wide { grid-column: 1 / -1; }
+}
+
+.certs { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+
+.reviews {
+  h2 { display: flex; align-items: baseline; gap: 0.75rem; font-size: 1.25rem; }
+  &__score { font-size: 1rem; font-weight: 500; }
+  &__layout { display: grid; gap: 1.5rem; grid-template-columns: minmax(0, 1fr); }
+  &__list { display: flex; flex-direction: column; gap: 0.75rem; }
+  &__form h3 { margin-top: 0; }
+}
+
+@media (min-width: 960px) {
+  .reviews__layout { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; }
+}
+
+.review {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+
+  &__title { margin: 0.5rem 0 0; font-size: 1rem; }
+  &__body { margin: 0.5rem 0; white-space: pre-line; overflow-wrap: anywhere; }
+  &__meta { font-size: 0.8125rem; }
+}
+
+.pi-star-fill { color: var(--p-yellow-500); }
+:host ::ng-deep .mt { margin-top: 1rem; }
