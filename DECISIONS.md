@@ -1,41 +1,79 @@
 # Decisions
 
-## Assumptions: data quality in the PIM export
+## 1. Architecture
 
-The sample export has the following problems. The import fixes what it safely can and records every fix as an issue in `import_runs`, so the PIM team can correct the data at its source.
+```text
+ nightly PIM export (CSV)
+          │  import CLI (idempotent, transactional, audited)
+          ▼
+┌──────────────────┐     ┌─────────────────────────┐     ┌──────────────────────┐
+│ PostgreSQL       │◄────│ NestJS API (/api)       │◄────│ Angular SPA (PrimeNG)│
+│ products         │     │ ProductsModule          │     │ search page (URL =   │
+│ reviews          │     │ ReviewsModule           │     │ state), detail page, │
+│ import_runs      │     │ Prisma 7 + pg adapter   │     │ review form          │
+└──────────────────┘     └─────────────────────────┘     └──────────────────────┘
+```
 
-| Problem in `products.csv` | Decision | Why |
-| --- | --- | --- |
-| Empty product name (`P-10119`) | Import the product and use the **SKU** as its name, with a `MISSING_NAME` warning | Skipping the row would hide a sellable product. `chemical_name` was the obvious fallback, but customers would read it as the trade name, and many products share the same chemistry (e.g. several "Bentonite" products). The SKU is clearly a placeholder, is unique, and can be searched. |
-| Inconsistent status (`active`, `ACTIVE`, `Phase out`) | Map known variants to `ACTIVE / PHASE_OUT / DISCONTINUED`. **Reject** rows with an unknown status and leave the existing data as it is | Guessing could show a discontinued product as available, which is the exact problem sales complained about. |
-| Duplicate SKU, same data (`P-10013`) | Keep one row and record a `DUPLICATE_SKU` issue | Harmless. |
-| Duplicate SKU, different data (`P-10151`: Active, then Discontinued) | **The last row wins**, with a `CONFLICTING_DUPLICATE_SKU` warning | Assumes the export is appended in chronological order. Needs to be confirmed with the PIM owners. |
-| Leading/trailing whitespace (`" EMEA "`) | Trim every field | Otherwise the region filters would show duplicate values. |
-| Invalid launch year (`n/a`, empty) | Store `null`. Warn only for values that are present but not a year | The launch year is optional information. |
-| SKU missing from the export | Mark the product as delisted (`delisted_at`), never delete it | Reviews must survive and links customers have shared must keep working. |
+- **Monorepo** (pnpm workspace): `apps/api` and `apps/web`, one Compose file. Both apps change together, and one command runs everything.
+- **The PIM owns catalogue data; customers own reviews.** Only the import writes catalogue columns. Only the review flow writes reviews and the rating aggregate. Neither ever overwrites the other's data, which is why the import can re-run safely.
+- **The import is a plain CLI**, not part of the API process. It is the same code that `docker compose up` runs on start-up and that a nightly job would run in production.
+- `normalize.ts` is a pure function and holds every data decision; it is tested in isolation. `import-products.ts` only writes to the database.
 
-## API
-
-| Decision | Alternatives considered | Why |
-| --- | --- | --- |
-| By default, the list returns only `ACTIVE`, listed products. `?status=` adds phase-out and discontinued ones | Show all products with a badge | Sales' main complaint is customers asking about products we no longer sell. Making them opt in is the safest default. |
-| The detail page also works for delisted products and returns `delisted: true` | 404 / 410 | Links customers have shared keep working, and the page can say clearly that the product is no longer offered. |
-| Values within one filter are OR-ed. Certifications are AND-ed | OR everywhere | A customer who needs Halal **and** Vegan needs both. "Surfactant or Emulsifier" is a normal comparison. |
-| Search uses `ILIKE` on name, SKU, chemistry and description, with LIKE wildcards escaped | Postgres full-text search, Elasticsearch | Simple and good enough for 200 products. At 50k products, the next step is a generated `tsvector` column with a GIN index (or `pg_trgm`). Elasticsearch only if relevance ranking or typo tolerance becomes a requirement. |
-| Offset pagination, max 50 per page, SKU as the final sort key | Cursor pagination | With 50k products and filters, offset is cheap enough and gives "page N" URLs that can be shared. The SKU tie-breaker keeps pages stable. |
-| Filter counts cover the whole listed catalogue, not the current selection | Counts that update as filters change | One cheap query that can be cached. Counts that react to the current selection are a UX improvement for later. |
-| The rating aggregate is stored on the product and **recounted** inside the review transaction, after locking the product row with `FOR UPDATE` | Computing the aggregate on every read; updating a running average | Sorting by rating then needs no aggregation over 50k rows. Recounting cannot drift, and the lock serialises concurrent reviews of the same product (covered by a test). |
-| Reviews: strict validation, trimmed text, max lengths, rate limit of 5 per minute per IP. The text is rendered only as plain text | Captcha, moderation queue | There is no authentication and moderation is out of scope. This is the minimum for a public write endpoint. The remaining risk (spam from many IPs, fake reviews) is listed under risks. |
-| API DTOs are separate from the Prisma model | Returning Prisma entities directly | Internal columns (id, timestamps, `delisted_at`) stay internal, and a schema change does not silently change the API contract. |
-
-## Frontend
+## 2. Key decisions
 
 | Decision | Alternatives considered | Why |
 | --- | --- | --- |
-| **Angular 21 + PrimeNG 21.1.10 (MIT) instead of Angular 22 + PrimeNG 22** | Angular 22 + PrimeNG 22 with a license key | PrimeNG 22 (July 2026) moved to the commercial *PrimeUI License*: it needs a key and shows an "Invalid PrimeUI License" banner without one. Removing that mechanism is forbidden by the license. A company of BASF's size does not qualify for the free Community License, so it would need per-developer licences. PrimeNG 21.1.10 is the last MIT release and requires Angular 21, which is still supported (LTS). This is a deliberate deviation from "latest stable". PrimeNG is pinned to an exact version so an update cannot silently pull in a different licence. |
-| The URL is the single source of truth for the search: query, filters, sort, page | Component state plus a "copy link" feature | "Send a colleague a link to exactly what I'm looking at" then works without extra effort, along with the back button and reload. All conversion happens in one pure, tested module (`search-state.ts`). Defaults are left out of the URL so links stay short. |
-| Search typing is debounced and replaces the history entry; filter changes add a history entry | Pushing every change | The back button undoes a filter, not a single keystroke. |
-| Mobile-first: cards instead of a table, filters in a bottom drawer on phones and a sidebar on desktop, native share sheet on phones (clipboard elsewhere) | Data table | Customers use the app at trade fairs. A table with 8 columns does not work at 390px. |
-| Clear availability messaging: status badge, and a notice on the detail page for phase-out, discontinued and delisted products | Badge only | This is the business problem ("customers ask about products we no longer sell"), so it is spelled out. |
-| Reviews are rendered only through interpolation (plain text), never `[innerHTML]` | Sanitised HTML | Untrusted public input. Verified end-to-end with an HTML payload. |
-| API types are mirrored by hand in `core/api.types.ts` | Shared contracts package, generated OpenAPI client | This is the cheapest option for two endpoints. A generated client is the next step once the API grows. |
+| **Import: set-based upsert by SKU that skips unchanged rows** (`INSERT … ON CONFLICT … WHERE … IS DISTINCT FROM`), in one transaction under an advisory lock | `prisma.upsert` per row; delete everything and re-insert | Re-runs are no-ops (a second run reports "200 unchanged"), so `updated_at` stays meaningful. It takes one statement per 2,000 rows instead of 50k round trips. Delete-and-insert would cascade into reviews. |
+| **Products are never deleted.** A SKU missing from the export gets `delisted_at` and is relisted if it returns | Hard delete; ignore missing SKUs | Reviews must survive. Shared links must keep working. Ignoring missing SKUs would recreate the "stale spreadsheet" problem. |
+| **Import safety guard:** abort with no changes if the export would delist >50% of the catalogue (`--force` to override). There is also a `--dry-run` | Trust the file | A truncated nightly file would otherwise wipe the catalogue overnight. |
+| **Only `ACTIVE` products are shown by default**, with an explicit "include phase-out and discontinued" toggle, a status badge and a notice on the detail page | Show everything with a badge | This is the business problem sales described. Opting in is the safest default. |
+| **The URL is the single source of truth** for search, filters, sort and page | Component state plus a "copy link" button | Shareable links, the back button and reload all work without extra code. One pure, tested module translates between URL, UI and API. |
+| **Search uses `ILIKE`** on name, SKU, chemistry and description, with wildcards escaped. **Offset pagination** with a stable SKU tie-breaker | Postgres full-text search, Elasticsearch; cursor pagination | Good enough for v1 and simple to reason about. At 50k products the next step is a `tsvector`/`pg_trgm` index in Postgres; Elasticsearch only if relevance or typo tolerance becomes a requirement. Offset pages are cheap at this size and give "page N" URLs that can be shared. |
+| **Rating aggregate stored on the product** and recounted in the review transaction after `SELECT … FOR UPDATE` | Aggregate on every read; running average | Sorting by rating needs no aggregation. Recounting cannot drift, and the row lock serialises concurrent reviews (covered by a test). |
+| **Angular 21 + PrimeNG 21.1.10 (MIT) instead of 22** | Angular 22 + PrimeNG 22 with a license key | PrimeNG 22 moved to the commercial *PrimeUI License*: it needs a key, shows a banner without one, and forbids removing that check. A company of BASF's size would need paid per-developer licences. PrimeNG 21.1.10 is the last MIT release and requires Angular 21, which is still supported. PrimeNG is pinned exactly so an update cannot pull in a different licence. |
+| **Prisma 7.10.1** (stable), with raw SQL only where it matters | Prisma 8 (only a release candidate when this was built); a query builder | Type-safe CRUD for most of the code. Raw SQL for the bulk upsert and the row lock, which Prisma cannot express. |
+| **Mobile-first UI**: cards, filters in a bottom drawer on phones and a sidebar on desktop, native share sheet | Data table | Customers use the app at trade fairs. An 8-column table does not work at 390px. |
+
+## 3. Assumptions
+
+- **Data quality.** The sample export contains real-world problems, and the import handles each one explicitly. Every fix is recorded in `import_runs.issues` for the PIM team:
+
+  | In `products.csv` | Handling |
+  | --- | --- |
+  | Status `active` / `ACTIVE` / `Phase out` | Normalised to `ACTIVE / PHASE_OUT / DISCONTINUED`. An unknown status rejects the row (guessing could show a discontinued product as available), and the existing data stays untouched. |
+  | Duplicate SKU `P-10013` (identical) / `P-10151` (Active, then Discontinued) | The last row wins, with a warning. **Assumes the export is chronological; to confirm with the PIM owners.** |
+  | Empty name (`P-10119`) | The SKU is used as the name, with a warning. Not `chemical_name`: customers would read it as a trade name, and many products share the same chemistry. |
+  | `" EMEA "`, `"  Puraxin SF 120 "` | All fields are trimmed, otherwise filters would show duplicate values. |
+  | Launch year `n/a` or empty | Stored as `null`. |
+
+- **SKU is the stable business key** in the PIM, and SKUs are not reused for different products.
+- The **nightly export is delivered as a file**. Delivery (SFTP, blob storage) and scheduling belong to the environment, not to the app.
+- **Phase-out products are still sellable** but should not be the default answer. Reviews are allowed for phase-out and discontinued products (that experience is still useful), but not for delisted ones.
+- **Reviews without authentication.** Authors give a display name only, with no e-mail or other personal data, so there is nothing to protect under GDPR beyond the free text itself.
+- **English-only UI** for v1. Product data comes in English from the PIM.
+
+## 4. Risks and how they are addressed
+
+| Risk | Mitigation now | Next step |
+| --- | --- | --- |
+| Truncated or corrupt export wipes the catalogue | Header validation, a single transaction, the >50% delisting guard, `--dry-run`, the audit trail | Alerting when an import fails or produces many warnings |
+| Spam or fake reviews (public, unauthenticated) | Validation, length limits, 5 posts per minute per IP, plain-text rendering (no XSS), no editing | Authentication or verified customers, moderation, captcha. Per-IP limits do not stop distributed spam |
+| Rate limiter is in memory, so with several API instances each instance has its own limit | Acceptable for a single instance | Redis-backed throttler storage |
+| Search performance at 50k products | Indexed filters, a GIN index on certifications, page size capped at 50 | Full-text or trigram index; load test |
+| Hand-maintained API types drift between web and API | One types file, HTTP integration tests | OpenAPI spec and a generated client |
+| Migrations run on API start-up (fine for one instance, a race with several) | Single instance in Compose | Run migrations as a separate deployment job |
+| PIM data mistakes reach customers immediately | Issues logged per run | Quality report to the PIM team; block publishing on critical errors |
+
+## 5. Deliberately left out, and next steps to production
+
+**Left out for v1:** authentication, moderation, i18n, Elasticsearch, side-by-side product comparison, filter counts that react to the current selection, relevance ranking, scheduled import (it is a CLI; the scheduler belongs to the platform), observability, CI.
+
+**To take this to production:**
+
+1. A CI pipeline (lint, unit and integration tests against Postgres, image build) and separate migration and import jobs, with the import scheduled nightly.
+2. Production images: multi-stage builds, no dev dependencies, non-root user, health and readiness checks.
+3. Observability: structured logs, metrics for import runs and API latency, alerts on failed imports.
+4. Postgres full-text or trigram search and a load test at 50k products.
+5. Review integrity: authentication or verified purchases, moderation and reporting, a Redis-backed rate limit.
+6. An OpenAPI contract and generated client, and e2e tests for the critical flows (search → detail → review).
+7. Accessibility audit (WCAG 2.1 AA) and caching of filter options.
