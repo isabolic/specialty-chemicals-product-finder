@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: finder
+      POSTGRES_PASSWORD: finder
+      POSTGRES_DB: product_finder
+    ports:
+      - '5433:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U finder -d product_finder']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://finder:finder@db:5432/product_finder?schema=public
+      PORT: 3000
+    # Migrations + idempotent import run on every start, so `docker compose up`
+    # always reflects the CSV in ./data (the stand-in for the nightly PIM export).
+    command: sh -c "pnpm prisma:migrate:deploy && pnpm import:products:prod /data/products.csv && node dist/main.js"
+    volumes:
+      - ./data:/data:ro
+    ports:
+      - '3000:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - '4200:80'
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

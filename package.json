@@ -1,0 +1,18 @@
+{
+  "name": "product-finder",
+  "private": true,
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d db",
+    "db:migrate": "pnpm --filter api prisma:migrate:deploy",
+    "db:import": "pnpm --filter api import:products",
+    "dev:api": "pnpm --filter api start:dev",
+    "dev:web": "pnpm --filter web start",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "test:integration": "pnpm --filter api test:integration"
+  }
+}

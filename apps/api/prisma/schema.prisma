@@ -1,0 +1,93 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Normalised lifecycle status. The PIM export is inconsistent
+/// ("Active", "active", "ACTIVE", "Phase-out", "Phase out", ...).
+enum ProductStatus {
+  ACTIVE
+  PHASE_OUT
+  DISCONTINUED
+
+  @@map("product_status")
+}
+
+/// Catalogue data. Owned by the PIM: only the import writes these columns
+/// (except the review aggregates, which are owned by the review flow).
+model Product {
+  id              Int           @id @default(autoincrement())
+  /// Business key from the PIM; the import upserts on it.
+  sku             String        @unique
+  name            String
+  chemicalName    String        @map("chemical_name")
+  function        String
+  applicationArea String        @map("application_area")
+  region          String
+  certifications  String[]      @default([])
+  status          ProductStatus
+  launchYear      Int?          @map("launch_year")
+  description     String
+
+  /// Set when a SKU disappears from the PIM export. We never hard-delete:
+  /// reviews must survive and shared links must keep resolving.
+  delistedAt      DateTime?     @map("delisted_at")
+
+  /// Denormalised so results can be sorted by rating without aggregating
+  /// 50k products on every request. Maintained in the review transaction.
+  reviewCount     Int           @default(0) @map("review_count")
+  ratingAverage   Float?        @map("rating_average")
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at")
+
+  reviews Review[]
+
+  @@index([status])
+  @@index([function])
+  @@index([applicationArea])
+  @@index([region])
+  @@index([certifications], type: Gin)
+  @@map("products")
+}
+
+/// User-generated content. Never touched by the import.
+model Review {
+  id         String   @id @default(uuid()) @db.Uuid
+  productId  Int      @map("product_id")
+  /// 1..5, also enforced by a CHECK constraint in the migration.
+  rating     Int      @db.SmallInt
+  authorName String   @map("author_name") @db.VarChar(80)
+  title      String?  @db.VarChar(120)
+  body       String   @db.VarChar(4000)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([productId, createdAt(sort: Desc)])
+  @@map("reviews")
+}
+
+/// Audit trail for every import run, so "why does the finder show X?"
+/// can be answered without digging through logs.
+model ImportRun {
+  id         Int       @id @default(autoincrement())
+  source     String
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  status     String    @default("running")
+  rowsRead   Int       @default(0) @map("rows_read")
+  created    Int       @default(0)
+  updated    Int       @default(0)
+  unchanged  Int       @default(0)
+  delisted   Int       @default(0)
+  rejected   Int       @default(0)
+  issues     Json      @default("[]")
+
+  @@map("import_runs")
+}
